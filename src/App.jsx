@@ -61,6 +61,7 @@ function GastosAppInner({ user }) {
   const [newCardLimite, setNewCardLimite] = useState("");
   const [confirmDeleteTarjeta, setConfirmDeleteTarjeta] = useState(false);
   const [confirmDeleteItemId, setConfirmDeleteItemId] = useState(null);
+  const [editingTarjetaItemId, setEditingTarjetaItemId] = useState(null);
 
   useEffect(() => {
     async function loadAll() {
@@ -159,6 +160,15 @@ function GastosAppInner({ user }) {
     setGastosTarjeta(prev => prev.map(s => s.id === seedId ? { ...s, finMonth } : s));
   }
 
+  async function updateSeedInfo(seedId, updates) {
+    const { error } = await supabase.from("gastos_tarjeta").update({
+      nombre: updates.nombre, categoria: updates.categoria, monto: updates.monto,
+      moneda: updates.moneda, fecha: updates.fecha, cuota_mensual: updates.cuotaMensual,
+    }).eq("id", seedId);
+    if (error) { console.error(error); return; }
+    setGastosTarjeta(prev => prev.map(s => s.id === seedId ? { ...s, ...updates } : s));
+  }
+
   function getTarjeta(id) { return tarjetas.find(t => t.id === id) || tarjetas[0]; }
 
   function updateTarjeta(id, updater) {
@@ -201,6 +211,15 @@ function GastosAppInner({ user }) {
     const { error } = await supabase.from("movimientos").delete().eq("id", id);
     if (error) { console.error(error); return; }
     setMovimientos(prev => prev.filter(m => m.id !== id));
+  }
+
+  async function updateMovimientoInfo(id, updates) {
+    const { error } = await supabase.from("movimientos").update({
+      nombre: updates.nombre, categoria: updates.categoria, monto: updates.monto,
+      moneda: updates.moneda, fecha: updates.fecha, tipo: updates.tipo,
+    }).eq("id", id);
+    if (error) { console.error(error); return; }
+    setMovimientos(prev => prev.map(m => m.id === id ? { ...m, ...updates } : m));
   }
 
   const tarj = getTarjeta(activeTarjeta);
@@ -492,40 +511,61 @@ function GastosAppInner({ user }) {
             <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 18 }}>
               {tarjetaItems.length === 0 && <p style={{ textAlign: "center", color: nude.textMuted, fontSize: 13.5, padding: "20px 0" }}>Todavía no agregaste gastos de tarjeta este mes ✿</p>}
               {tarjetaItems.map(g => (
-                <div className="gst-row" key={g.id}>
-                  <div style={{ textAlign: "left" }}>
-                    <div style={{ fontWeight: 600, fontSize: 14 }}>{g.nombre}</div>
-                    <div style={{ fontSize: 12, color: nude.textMuted, marginTop: 2 }}>
-                      {g.categoria}{g.fijo ? " · fijo mensual" : (g.cuotas > 1 ? ` · cuota ${g.cuotaActual}/${g.cuotas}` : "")}{g.fecha ? ` · ${fmtFecha(g.fecha)}` : ""}
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <div style={{ textAlign: "right" }}>
-                      <div style={{ fontWeight: 700, fontSize: 14.5 }}>{fmt(g.cuotaMensual, g.moneda)}</div>
-                      {!g.fijo && g.cuotas > 1 && <div style={{ fontSize: 11, color: nude.textMuted }}>total {fmt(g.monto, g.moneda)}</div>}
-                    </div>
-                    {confirmDeleteItemId === g.id ? (
-                      g.fijo ? (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
-                          <div style={{ display: "flex", gap: 6 }}>
-                            <button className="gst-btn-ghost" style={{ padding: "5px 10px", fontSize: 11 }} onClick={() => setConfirmDeleteItemId(null)}>no</button>
-                            <button className="gst-btn-ghost" style={{ padding: "5px 10px", fontSize: 11 }}
-                              onClick={() => { darDeBajaSeed(activeTarjeta, g.seedId, g.seedMonth, addMonths(currentMonth, -1)); setConfirmDeleteItemId(null); }}>dar de baja</button>
-                            <button className="gst-btn" style={{ padding: "5px 10px", fontSize: 11, background: "#7A4A2E" }}
-                              onClick={() => { removeSeed(activeTarjeta, g.seedId, g.seedMonth); setConfirmDeleteItemId(null); }}>borrar todo</button>
-                          </div>
+                <div className="gst-row" key={g.id} style={editingTarjetaItemId === g.id ? { display: "block" } : {}}>
+                  {editingTarjetaItemId === g.id ? (
+                    <EditTarjetaItemForm
+                      item={g}
+                      onSave={updates => { updateSeedInfo(g.seedId, updates); setEditingTarjetaItemId(null); }}
+                      onCancel={() => setEditingTarjetaItemId(null)}
+                      nude={nude}
+                    />
+                  ) : (
+                    <>
+                      <div style={{ textAlign: "left" }}>
+                        <div style={{ fontWeight: 600, fontSize: 14 }}>{g.nombre}</div>
+                        <div style={{ fontSize: 12, color: nude.textMuted, marginTop: 2 }}>
+                          {g.categoria}{g.fijo ? " · fijo mensual" : (g.cuotas > 1 ? ` · cuota ${g.cuotaActual}/${g.cuotas}` : "")}{g.fecha ? ` · ${fmtFecha(g.fecha)}` : ""}
                         </div>
-                      ) : (
-                        <div style={{ display: "flex", gap: 6 }}>
-                          <button className="gst-btn-ghost" style={{ padding: "5px 10px", fontSize: 11 }} onClick={() => setConfirmDeleteItemId(null)}>no</button>
-                          <button className="gst-btn" style={{ padding: "5px 10px", fontSize: 11, background: "#7A4A2E" }}
-                            onClick={() => { removeSeed(activeTarjeta, g.seedId, g.seedMonth); setConfirmDeleteItemId(null); }}>sí, borrar</button>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontWeight: 700, fontSize: 14.5 }}>{fmt(g.cuotaMensual, g.moneda)}</div>
+                          {!g.fijo && g.cuotas > 1 && <div style={{ fontSize: 11, color: nude.textMuted }}>total {fmt(g.monto, g.moneda)}</div>}
                         </div>
-                      )
-                    ) : (
-                      <button className="gst-x" onClick={() => setConfirmDeleteItemId(g.id)}>×</button>
-                    )}
-                  </div>
+                        {confirmDeleteItemId === g.id ? (
+                          g.fijo ? (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+                              <div style={{ display: "flex", gap: 6 }}>
+                                <button className="gst-btn-ghost" style={{ padding: "5px 10px", fontSize: 11 }} onClick={() => setConfirmDeleteItemId(null)}>no</button>
+                                <button className="gst-btn-ghost" style={{ padding: "5px 10px", fontSize: 11 }}
+                                  onClick={() => { darDeBajaSeed(activeTarjeta, g.seedId, g.seedMonth, addMonths(currentMonth, -1)); setConfirmDeleteItemId(null); }}>dar de baja</button>
+                                <button className="gst-btn" style={{ padding: "5px 10px", fontSize: 11, background: "#7A4A2E" }}
+                                  onClick={() => { removeSeed(activeTarjeta, g.seedId, g.seedMonth); setConfirmDeleteItemId(null); }}>borrar todo</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div style={{ display: "flex", gap: 6 }}>
+                              <button className="gst-btn-ghost" style={{ padding: "5px 10px", fontSize: 11 }} onClick={() => setConfirmDeleteItemId(null)}>no</button>
+                              <button className="gst-btn" style={{ padding: "5px 10px", fontSize: 11, background: "#7A4A2E" }}
+                                onClick={() => { removeSeed(activeTarjeta, g.seedId, g.seedMonth); setConfirmDeleteItemId(null); }}>sí, borrar</button>
+                            </div>
+                          )
+                        ) : (
+                          <>
+                            <button onClick={() => setEditingTarjetaItemId(g.id)}
+                              style={{ background: "none", border: "none", cursor: "pointer", color: nude.textMuted, opacity: 0.6, padding: 2, display: "flex", alignItems: "center" }}
+                              title="Editar">
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                              </svg>
+                            </button>
+                            <button className="gst-x" onClick={() => setConfirmDeleteItemId(g.id)}>×</button>
+                          </>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
               ))}
             </div>
@@ -546,6 +586,7 @@ function GastosAppInner({ user }) {
             setShowAdd={activeTab === "digital" ? setShowAddDigital : setShowAddEfectivo}
             onAdd={item => addMovimiento(activeTab, item)}
             onRemove={id => removeMovimiento(activeTab, id)}
+            onUpdate={(id, updates) => updateMovimientoInfo(id, updates)}
             nude={nude}
           />
         )}
@@ -634,9 +675,51 @@ function AddTarjetaForm({ onAdd, onCancel, nude }) {
   );
 }
 
-function MovimientosSection({ movs, totales, seccion, showAdd, setShowAdd, onAdd, onRemove, nude }) {
+function EditTarjetaItemForm({ item, onSave, onCancel, nude }) {
+  const [nombre, setNombre] = useState(item.nombre);
+  const [monto, setMonto] = useState(item.monto);
+  const [categoria, setCategoria] = useState(item.categoria);
+  const [moneda, setMoneda] = useState(item.moneda || "ARS");
+  const [fecha, setFecha] = useState(item.fecha || todayISO());
+
+  function handleSubmit() {
+    const montoNum = Number(monto);
+    if (!nombre.trim() || !montoNum || montoNum <= 0) return;
+    const cuotas = item.cuotas || 1;
+    const cuotaMensual = item.fijo ? montoNum : Math.round((montoNum / cuotas) * 100) / 100;
+    onSave({ nombre: nombre.trim(), categoria, monto: montoNum, moneda, fecha, cuotaMensual });
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <input className="gst-input" value={nombre} onChange={e => setNombre(e.target.value)} />
+      <div style={{ display: "flex", gap: 8 }}>
+        <input className="gst-input" type="number" value={monto} onChange={e => setMonto(e.target.value)} />
+        <input className="gst-input" type="date" value={fecha} onChange={e => setFecha(e.target.value)} />
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <select className="gst-input" value={categoria} onChange={e => setCategoria(e.target.value)}>
+          {CATS_TARJETA.map(c => <option key={c}>{c}</option>)}
+        </select>
+        <select className="gst-input" value={moneda} onChange={e => setMoneda(e.target.value)}>
+          {MONEDAS.map(m => <option key={m.code} value={m.code}>{m.sym} {m.label}</option>)}
+        </select>
+      </div>
+      {!item.fijo && item.cuotas > 1 && (
+        <p style={{ fontSize: 11.5, color: nude.textMuted, margin: 0 }}>El monto que pongas se reparte entre las {item.cuotas} cuotas.</p>
+      )}
+      <div style={{ display: "flex", gap: 8 }}>
+        <button className="gst-btn-ghost" style={{ flex: 1 }} onClick={onCancel}>cancelar</button>
+        <button className="gst-btn" style={{ flex: 1 }} onClick={handleSubmit}>guardar cambios</button>
+      </div>
+    </div>
+  );
+}
+
+function MovimientosSection({ movs, totales, seccion, showAdd, setShowAdd, onAdd, onRemove, onUpdate, nude }) {
   const label = seccion === "digital" ? "movimiento digital" : "movimiento en efectivo";
   const [confirmId, setConfirmId] = useState(null);
+  const [editingId, setEditingId] = useState(null);
   const monedas = Object.keys(totales);
   return (
     <>
@@ -661,25 +744,41 @@ function MovimientosSection({ movs, totales, seccion, showAdd, setShowAdd, onAdd
       <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 18 }}>
         {movs.length === 0 && <p style={{ textAlign: "center", color: nude.textMuted, fontSize: 13.5, padding: "20px 0" }}>Todavía no agregaste {label}s este mes ✿</p>}
         {movs.map(m => (
-          <div className="gst-row" key={m.id}>
-            <div style={{ textAlign: "left" }}>
-              <div style={{ fontWeight: 600, fontSize: 14 }}>{m.nombre}</div>
-              <div style={{ fontSize: 12, color: nude.textMuted, marginTop: 2 }}>{m.categoria}{m.fecha ? ` · ${fmtFecha(m.fecha)}` : ""}</div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ fontWeight: 700, fontSize: 14.5, color: m.tipo === "ingreso" ? "#3B6D11" : nude.text }}>
-                {m.tipo === "ingreso" ? "+" : "-"}{fmt(m.monto, m.moneda)}
-              </div>
-              {confirmId === m.id ? (
-                <div style={{ display: "flex", gap: 6 }}>
-                  <button className="gst-btn-ghost" style={{ padding: "5px 10px", fontSize: 11 }} onClick={() => setConfirmId(null)}>no</button>
-                  <button className="gst-btn" style={{ padding: "5px 10px", fontSize: 11, background: "#7A4A2E" }}
-                    onClick={() => { onRemove(m.id); setConfirmId(null); }}>sí, borrar</button>
+          <div className="gst-row" key={m.id} style={editingId === m.id ? { display: "block" } : {}}>
+            {editingId === m.id ? (
+              <EditMovForm item={m} onSave={updates => { onUpdate(m.id, updates); setEditingId(null); }} onCancel={() => setEditingId(null)} nude={nude} />
+            ) : (
+              <>
+                <div style={{ textAlign: "left" }}>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>{m.nombre}</div>
+                  <div style={{ fontSize: 12, color: nude.textMuted, marginTop: 2 }}>{m.categoria}{m.fecha ? ` · ${fmtFecha(m.fecha)}` : ""}</div>
                 </div>
-              ) : (
-                <button className="gst-x" onClick={() => setConfirmId(m.id)}>×</button>
-              )}
-            </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14.5, color: m.tipo === "ingreso" ? "#3B6D11" : nude.text }}>
+                    {m.tipo === "ingreso" ? "+" : "-"}{fmt(m.monto, m.moneda)}
+                  </div>
+                  {confirmId === m.id ? (
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button className="gst-btn-ghost" style={{ padding: "5px 10px", fontSize: 11 }} onClick={() => setConfirmId(null)}>no</button>
+                      <button className="gst-btn" style={{ padding: "5px 10px", fontSize: 11, background: "#7A4A2E" }}
+                        onClick={() => { onRemove(m.id); setConfirmId(null); }}>sí, borrar</button>
+                    </div>
+                  ) : (
+                    <>
+                      <button onClick={() => setEditingId(m.id)}
+                        style={{ background: "none", border: "none", cursor: "pointer", color: nude.textMuted, opacity: 0.6, padding: 2, display: "flex", alignItems: "center" }}
+                        title="Editar">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                        </svg>
+                      </button>
+                      <button className="gst-x" onClick={() => setConfirmId(m.id)}>×</button>
+                    </>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         ))}
       </div>
@@ -729,6 +828,49 @@ function AddMovForm({ onAdd, onCancel, nude }) {
       <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
         <button className="gst-btn-ghost" style={{ flex: 1 }} onClick={onCancel}>cancelar</button>
         <button className="gst-btn" style={{ flex: 1 }} onClick={handleSubmit}>guardar</button>
+      </div>
+    </div>
+  );
+}
+
+function EditMovForm({ item, onSave, onCancel, nude }) {
+  const [nombre, setNombre] = useState(item.nombre);
+  const [monto, setMonto] = useState(item.monto);
+  const [tipo, setTipo] = useState(item.tipo);
+  const [categoria, setCategoria] = useState(item.categoria);
+  const [moneda, setMoneda] = useState(item.moneda || "ARS");
+  const [fecha, setFecha] = useState(item.fecha || todayISO());
+  const cats = tipo === "ingreso" ? CATS_INGRESO : CATS_GASTO;
+
+  function handleSubmit() {
+    const montoNum = Number(monto);
+    if (!nombre.trim() || !montoNum || montoNum <= 0) return;
+    onSave({ nombre: nombre.trim(), categoria, monto: montoNum, moneda, fecha, tipo });
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", gap: 4, background: nude.accentLight, borderRadius: 999, padding: 4 }}>
+        {["gasto", "ingreso"].map(t => (
+          <div key={t} onClick={() => setTipo(t)} style={{ flex: 1, textAlign: "center", padding: "8px 0", borderRadius: 999, fontSize: 13, fontWeight: 700, cursor: "pointer", background: tipo === t ? nude.accent : "transparent", color: tipo === t ? "#fff" : nude.accentDark }}>{t}</div>
+        ))}
+      </div>
+      <input className="gst-input" value={nombre} onChange={e => setNombre(e.target.value)} />
+      <div style={{ display: "flex", gap: 8 }}>
+        <input className="gst-input" type="number" value={monto} onChange={e => setMonto(e.target.value)} />
+        <input className="gst-input" type="date" value={fecha} onChange={e => setFecha(e.target.value)} />
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <select className="gst-input" value={categoria} onChange={e => setCategoria(e.target.value)}>
+          {cats.map(c => <option key={c}>{c}</option>)}
+        </select>
+        <select className="gst-input" value={moneda} onChange={e => setMoneda(e.target.value)}>
+          {MONEDAS.map(m => <option key={m.code} value={m.code}>{m.sym} {m.label}</option>)}
+        </select>
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button className="gst-btn-ghost" style={{ flex: 1 }} onClick={onCancel}>cancelar</button>
+        <button className="gst-btn" style={{ flex: 1 }} onClick={handleSubmit}>guardar cambios</button>
       </div>
     </div>
   );
