@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { supabase } from "./supabaseClient";
 
 const CATS_TARJETA = ["Moda y Belleza","Servicios","Salud","Hogar","Otro"];
 const CATS_GASTO = ["Comida","Transporte","Salidas","Moda y Belleza","Salud","Servicios","Caprichos","Regalo","Otro"];
@@ -40,12 +41,13 @@ const nude = {
   accentDark: "#5C3B22", accentLight: "#F0E6D8",
 };
 
-export default function GastosApp() {
+function GastosAppInner({ user }) {
   const today = new Date();
   const [currentMonth, setCurrentMonth] = useState(monthKey(today));
-  const [allData, setAllData] = useState({});
-  const [tarjetas, setTarjetas] = useState([{ id: "t1", nombre: "Mi Tarjeta", limite: 0 }]);
-  const [activeTarjeta, setActiveTarjeta] = useState("t1");
+  const [tarjetas, setTarjetas] = useState([]);
+  const [gastosTarjeta, setGastosTarjeta] = useState([]);
+  const [movimientos, setMovimientos] = useState([]);
+  const [activeTarjeta, setActiveTarjeta] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [activeTab, setActiveTab] = useState("tarjeta");
   const [showAddTarjeta, setShowAddTarjeta] = useState(false);
@@ -61,46 +63,45 @@ export default function GastosApp() {
   const [confirmDeleteItemId, setConfirmDeleteItemId] = useState(null);
 
   useEffect(() => {
-    async function load() {
-      try {
-        const r = await window.storage.get("gastos-v2");
-        if (r && r.value) {
-          const d = JSON.parse(r.value);
-          setAllData(d.allData || {});
-          if (d.tarjetas) setTarjetas(d.tarjetas);
-        }
-      } catch (e) {}
+    async function loadAll() {
+      const { data: tarjetasData, error: tErr } = await supabase.from("tarjetas").select("*").order("created_at");
+      if (tErr) console.error(tErr);
+      let tarjetasList = tarjetasData || [];
+      if (tarjetasList.length === 0) {
+        const { data: inserted, error: insErr } = await supabase.from("tarjetas")
+          .insert({ user_id: user.id, nombre: "Mi Tarjeta", limite: 0 }).select().single();
+        if (insErr) console.error(insErr);
+        if (inserted) tarjetasList = [inserted];
+      }
+      setTarjetas(tarjetasList.map(t => ({ id: t.id, nombre: t.nombre, limite: Number(t.limite) || 0 })));
+      setActiveTarjeta(tarjetasList[0]?.id || null);
+
+      const { data: gastosData, error: gErr } = await supabase.from("gastos_tarjeta").select("*");
+      if (gErr) console.error(gErr);
+      setGastosTarjeta((gastosData || []).map(g => ({
+        id: g.id, tarjetaId: g.tarjeta_id, nombre: g.nombre, categoria: g.categoria,
+        monto: Number(g.monto), moneda: g.moneda, fecha: g.fecha, cuotas: g.cuotas,
+        cuotaMensual: Number(g.cuota_mensual), fijo: g.fijo, startMonth: g.start_month, finMonth: g.fin_month,
+      })));
+
+      const { data: movsData, error: mErr } = await supabase.from("movimientos").select("*");
+      if (mErr) console.error(mErr);
+      setMovimientos((movsData || []).map(m => ({
+        id: m.id, seccion: m.seccion, tipo: m.tipo, nombre: m.nombre, categoria: m.categoria,
+        monto: Number(m.monto), moneda: m.moneda, fecha: m.fecha, monthKey: m.month_key,
+      })));
+
       setLoaded(true);
     }
-    load();
-  }, []);
-
-  useEffect(() => {
-    if (!loaded) return;
-    const timeout = setTimeout(async () => {
-      try { await window.storage.set("gastos-v2", JSON.stringify({ allData, tarjetas })); }
-      catch (e) {}
-    }, 400);
-    return () => clearTimeout(timeout);
-  }, [allData, tarjetas, loaded]);
+    loadAll();
+  }, [user.id]);
 
   const [year, month] = currentMonth.split("-").map(Number);
   const monthLabel = `${MESES[month - 1]} ${year}`;
   function shiftMonth(delta) { const d = new Date(year, month - 1 + delta, 1); setCurrentMonth(monthKey(d)); }
 
-  function getMonthData(mk) {
-    return allData[mk] || { digital: [], efectivo: {} };
-  }
-
   function getAllSeeds(tarjetaId) {
-    const seeds = [];
-    Object.keys(allData).forEach(mk => {
-      const md = allData[mk];
-      if (md.tarjeta_seeds && md.tarjeta_seeds[tarjetaId]) {
-        md.tarjeta_seeds[tarjetaId].forEach(s => seeds.push(s));
-      }
-    });
-    return seeds;
+    return gastosTarjeta.filter(s => s.tarjetaId === tarjetaId);
   }
 
   function getItemsForMonth(tarjetaId, mk) {
@@ -132,106 +133,74 @@ export default function GastosApp() {
     return items;
   }
 
-  function addSeed(tarjetaId, seed) {
-    setAllData(prev => {
-      const base = prev[currentMonth] || {};
-      const seeds = base.tarjeta_seeds || {};
-      const arr = seeds[tarjetaId] || [];
-      return {
-        ...prev,
-        [currentMonth]: {
-          ...base,
-          tarjeta_seeds: { ...seeds, [tarjetaId]: [...arr, { ...seed, startMonth: currentMonth, id: uid() }] }
-        }
-      };
-    });
+  async function addSeed(tarjetaId, seed) {
+    const { data, error } = await supabase.from("gastos_tarjeta").insert({
+      user_id: user.id, tarjeta_id: tarjetaId, nombre: seed.nombre, categoria: seed.categoria,
+      monto: seed.monto, moneda: seed.moneda || "ARS", fecha: seed.fecha || null,
+      cuotas: seed.cuotas, cuota_mensual: seed.cuotaMensual, fijo: !!seed.fijo, start_month: currentMonth,
+    }).select().single();
+    if (error) { console.error(error); return; }
+    setGastosTarjeta(prev => [...prev, {
+      id: data.id, tarjetaId: data.tarjeta_id, nombre: data.nombre, categoria: data.categoria,
+      monto: Number(data.monto), moneda: data.moneda, fecha: data.fecha, cuotas: data.cuotas,
+      cuotaMensual: Number(data.cuota_mensual), fijo: data.fijo, startMonth: data.start_month, finMonth: data.fin_month,
+    }]);
   }
 
-  function removeSeed(tarjetaId, seedId, seedMonth) {
-    setAllData(prev => {
-      const base = prev[seedMonth];
-      if (!base?.tarjeta_seeds?.[tarjetaId]) return prev;
-      return {
-        ...prev,
-        [seedMonth]: {
-          ...base,
-          tarjeta_seeds: {
-            ...base.tarjeta_seeds,
-            [tarjetaId]: base.tarjeta_seeds[tarjetaId].filter(s => s.id !== seedId)
-          }
-        }
-      };
-    });
+  async function removeSeed(tarjetaId, seedId, seedMonth) {
+    const { error } = await supabase.from("gastos_tarjeta").delete().eq("id", seedId);
+    if (error) { console.error(error); return; }
+    setGastosTarjeta(prev => prev.filter(s => s.id !== seedId));
   }
 
-  function darDeBajaSeed(tarjetaId, seedId, seedMonth, finMonth) {
-    setAllData(prev => {
-      const base = prev[seedMonth];
-      if (!base?.tarjeta_seeds?.[tarjetaId]) return prev;
-      return {
-        ...prev,
-        [seedMonth]: {
-          ...base,
-          tarjeta_seeds: {
-            ...base.tarjeta_seeds,
-            [tarjetaId]: base.tarjeta_seeds[tarjetaId].map(s => s.id === seedId ? { ...s, finMonth } : s)
-          }
-        }
-      };
-    });
+  async function darDeBajaSeed(tarjetaId, seedId, seedMonth, finMonth) {
+    const { error } = await supabase.from("gastos_tarjeta").update({ fin_month: finMonth }).eq("id", seedId);
+    if (error) { console.error(error); return; }
+    setGastosTarjeta(prev => prev.map(s => s.id === seedId ? { ...s, finMonth } : s));
   }
 
   function getTarjeta(id) { return tarjetas.find(t => t.id === id) || tarjetas[0]; }
 
   function updateTarjeta(id, updater) {
-    setTarjetas(prev => prev.map(t => t.id === id ? updater(t) : t));
-  }
-
-  function deleteTarjetaCompleta(id) {
-    setAllData(prev => {
-      const next = {};
-      Object.keys(prev).forEach(mk => {
-        const base = prev[mk];
-        if (!base?.tarjeta_seeds?.[id]) {
-          next[mk] = base;
-          return;
-        }
-        const seeds = { ...base.tarjeta_seeds };
-        delete seeds[id];
-        next[mk] = { ...base, tarjeta_seeds: seeds };
-      });
+    setTarjetas(prev => {
+      const next = prev.map(t => t.id === id ? updater(t) : t);
+      const updated = next.find(t => t.id === id);
+      if (updated) {
+        supabase.from("tarjetas").update({ nombre: updated.nombre, limite: updated.limite }).eq("id", id)
+          .then(({ error }) => { if (error) console.error(error); });
+      }
       return next;
     });
+  }
+
+  async function deleteTarjetaCompleta(id) {
+    const { error } = await supabase.from("tarjetas").delete().eq("id", id);
+    if (error) { console.error(error); return; }
+    setGastosTarjeta(prev => prev.filter(s => s.tarjetaId !== id));
     setTarjetas(prev => {
       const filtered = prev.filter(t => t.id !== id);
-      setActiveTarjeta(filtered[0]?.id || "");
+      setActiveTarjeta(filtered[0]?.id || null);
       return filtered;
     });
     setConfirmDeleteTarjeta(false);
   }
 
-  function addMovimiento(sec, item) {
-    setAllData(prev => {
-      const base = prev[currentMonth] || { digital: [], efectivo: {} };
-      if (sec === "digital") {
-        return { ...prev, [currentMonth]: { ...base, digital: [...(base.digital || []), item] } };
-      } else {
-        return { ...prev, [currentMonth]: { ...base, efectivo: { ...(base.efectivo || {}), [item.id]: item } } };
-      }
-    });
+  async function addMovimiento(sec, item) {
+    const { data, error } = await supabase.from("movimientos").insert({
+      user_id: user.id, seccion: sec, tipo: item.tipo, nombre: item.nombre, categoria: item.categoria,
+      monto: item.monto, moneda: item.moneda || "ARS", fecha: item.fecha || null, month_key: currentMonth,
+    }).select().single();
+    if (error) { console.error(error); return; }
+    setMovimientos(prev => [...prev, {
+      id: data.id, seccion: data.seccion, tipo: data.tipo, nombre: data.nombre, categoria: data.categoria,
+      monto: Number(data.monto), moneda: data.moneda, fecha: data.fecha, monthKey: data.month_key,
+    }]);
   }
 
-  function removeMovimiento(sec, id) {
-    setAllData(prev => {
-      const base = prev[currentMonth] || { digital: [], efectivo: {} };
-      if (sec === "digital") {
-        return { ...prev, [currentMonth]: { ...base, digital: (base.digital || []).filter(m => m.id !== id) } };
-      } else {
-        const ef = { ...(base.efectivo || {}) };
-        delete ef[id];
-        return { ...prev, [currentMonth]: { ...base, efectivo: ef } };
-      }
-    });
+  async function removeMovimiento(sec, id) {
+    const { error } = await supabase.from("movimientos").delete().eq("id", id);
+    if (error) { console.error(error); return; }
+    setMovimientos(prev => prev.filter(m => m.id !== id));
   }
 
   const tarj = getTarjeta(activeTarjeta);
@@ -261,9 +230,8 @@ export default function GastosApp() {
     return Object.values(map).sort((a, b) => b.monto - a.monto);
   }, [tarjetaItems]);
 
-  const monthData = getMonthData(currentMonth);
-  const digitalMovs = monthData.digital || [];
-  const efectivoMovs = Object.values(monthData.efectivo || {});
+  const digitalMovs = useMemo(() => movimientos.filter(m => m.seccion === "digital" && m.monthKey === currentMonth), [movimientos, currentMonth]);
+  const efectivoMovs = useMemo(() => movimientos.filter(m => m.seccion === "efectivo" && m.monthKey === currentMonth), [movimientos, currentMonth]);
 
   function calcTotalesPorMoneda(movs) {
     const map = {};
@@ -302,27 +270,30 @@ export default function GastosApp() {
       else addTo(mon, "totalIngresos", m.monto);
     });
     return porMoneda;
-  }, [tarjetas, allData, currentMonth]);
+  }, [tarjetas, gastosTarjeta, digitalMovs, efectivoMovs, currentMonth]);
 
   const last6Months = useMemo(() => {
     const result = [];
     for (let i = 5; i >= 0; i--) {
       const d = new Date(year, month - 1 - i, 1);
       const key = monthKey(d);
-      const md = allData[key] || {};
       let tTotal = 0;
       tarjetas.forEach(t => { getItemsForMonth(t.id, key).forEach(g => { if ((g.moneda || "ARS") === "ARS") tTotal += g.cuotaMensual; }); });
-      const dig = md.digital || [];
-      const efArr = Object.values(md.efectivo || {});
+      const digArr = movimientos.filter(m => m.seccion === "digital" && m.monthKey === key);
+      const efArr = movimientos.filter(m => m.seccion === "efectivo" && m.monthKey === key);
       const soloARS = x => (x.moneda || "ARS") === "ARS";
       result.push({
         key, label: MESES[d.getMonth()].slice(0, 3),
-        gastos: tTotal + dig.filter(x => x.tipo === "gasto" && soloARS(x)).reduce((a, x) => a + x.monto, 0) + efArr.filter(x => x.tipo === "gasto" && soloARS(x)).reduce((a, x) => a + x.monto, 0),
-        ingresos: dig.filter(x => x.tipo === "ingreso" && soloARS(x)).reduce((a, x) => a + x.monto, 0) + efArr.filter(x => x.tipo === "ingreso" && soloARS(x)).reduce((a, x) => a + x.monto, 0),
+        gastos: tTotal + digArr.filter(x => x.tipo === "gasto" && soloARS(x)).reduce((a, x) => a + x.monto, 0) + efArr.filter(x => x.tipo === "gasto" && soloARS(x)).reduce((a, x) => a + x.monto, 0),
+        ingresos: digArr.filter(x => x.tipo === "ingreso" && soloARS(x)).reduce((a, x) => a + x.monto, 0) + efArr.filter(x => x.tipo === "ingreso" && soloARS(x)).reduce((a, x) => a + x.monto, 0),
       });
     }
     return result;
-  }, [allData, tarjetas, year, month]);
+  }, [movimientos, tarjetas, gastosTarjeta, year, month]);
+
+  if (!loaded) {
+    return <div style={{ background: nude.bg, minHeight: "100vh" }} />;
+  }
 
   return (
     <div style={{ fontFamily: "'Manrope', sans-serif", background: nude.bg, minHeight: "100vh", padding: "28px 18px 60px", color: nude.text }}>
@@ -357,6 +328,13 @@ export default function GastosApp() {
             style={{ position: "absolute", top: 0, right: 0, background: activeTab === "resumen" ? nude.accent : "#fff", border: `1.5px solid ${nude.border}`, borderRadius: 999, width: 38, height: 38, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: activeTab === "resumen" ? "#fff" : nude.accent }}>
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
+            </svg>
+          </button>
+          <button onClick={() => supabase.auth.signOut()}
+            style={{ position: "absolute", top: 0, left: 0, background: "#fff", border: `1.5px solid ${nude.border}`, borderRadius: 999, width: 38, height: 38, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: nude.accent }}
+            title="Cerrar sesión">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
             </svg>
           </button>
         </div>
@@ -403,10 +381,13 @@ export default function GastosApp() {
                   <input className="gst-input" type="number" placeholder="Límite (opcional)" value={newCardLimite} onChange={e => setNewCardLimite(e.target.value)} />
                   <div style={{ display: "flex", gap: 8 }}>
                     <button className="gst-btn-ghost" style={{ flex: 1 }} onClick={() => setShowAddCard(false)}>cancelar</button>
-                    <button className="gst-btn" style={{ flex: 1 }} onClick={() => {
-                      const id = uid();
-                      setTarjetas(prev => [...prev, { id, nombre: newCardNombre.trim() || "Nueva tarjeta", limite: Number(newCardLimite) || 0 }]);
-                      setActiveTarjeta(id);
+                    <button className="gst-btn" style={{ flex: 1 }} onClick={async () => {
+                      const { data, error } = await supabase.from("tarjetas")
+                        .insert({ user_id: user.id, nombre: newCardNombre.trim() || "Nueva tarjeta", limite: Number(newCardLimite) || 0 })
+                        .select().single();
+                      if (error) { console.error(error); return; }
+                      setTarjetas(prev => [...prev, { id: data.id, nombre: data.nombre, limite: Number(data.limite) || 0 }]);
+                      setActiveTarjeta(data.id);
                       setShowAddCard(false);
                     }}>crear</button>
                   </div>
@@ -841,4 +822,89 @@ function ResumenSection({ resumen, monthLabel, last6, nude }) {
       </div>
     </>
   );
+}
+
+function AuthScreen() {
+  const [modo, setModo] = useState("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [avisoRegistro, setAvisoRegistro] = useState("");
+
+  async function handleSubmit() {
+    setError("");
+    setAvisoRegistro("");
+    if (!email.trim() || !password) { setError("Completá email y contraseña."); return; }
+    setLoading(true);
+    if (modo === "login") {
+      const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+      if (error) setError(error.message === "Invalid login credentials" ? "Email o contraseña incorrectos." : error.message);
+    } else {
+      const { error } = await supabase.auth.signUp({ email: email.trim(), password });
+      if (error) setError(error.message);
+      else setAvisoRegistro("Cuenta creada. Revisá tu email para confirmar antes de entrar.");
+    }
+    setLoading(false);
+  }
+
+  return (
+    <div style={{ fontFamily: "'Manrope', sans-serif", background: nude.bg, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
+        .gst-input { border: 1.5px solid ${nude.border}; border-radius: 14px; padding: 10px 14px; font-family: inherit; font-size: 14px; background: #fff; color: ${nude.text}; outline: none; width: 100%; box-sizing: border-box; }
+        .gst-input:focus { border-color: ${nude.accent}; }
+        .gst-btn { background: ${nude.accent}; color: #fff; border: none; border-radius: 999px; padding: 11px 22px; font-family: inherit; font-weight: 700; font-size: 14px; cursor: pointer; }
+        .gst-btn:hover { background: ${nude.accentDark}; }
+      `}</style>
+      <div style={{ background: "#fff", border: `1px solid ${nude.borderSoft}`, borderRadius: 20, padding: 28, width: "100%", maxWidth: 340 }}>
+        <div style={{ textAlign: "center", marginBottom: 18 }}>
+          <div style={{ fontSize: 24 }}>✿</div>
+          <h1 style={{ fontWeight: 700, fontSize: 20, margin: "4px 0 0", color: nude.accentDark }}>Mis gastos</h1>
+        </div>
+        <div style={{ display: "flex", gap: 4, background: nude.accentLight, borderRadius: 999, padding: 4, marginBottom: 16 }}>
+          {[{ id: "login", label: "Iniciar sesión" }, { id: "signup", label: "Crear cuenta" }].map(o => (
+            <div key={o.id} onClick={() => { setModo(o.id); setError(""); setAvisoRegistro(""); }}
+              style={{ flex: 1, textAlign: "center", padding: "8px 0", borderRadius: 999, fontSize: 12.5, fontWeight: 700, cursor: "pointer", background: modo === o.id ? nude.accent : "transparent", color: modo === o.id ? "#fff" : nude.accentDark }}>
+              {o.label}
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <input className="gst-input" type="email" placeholder="tu@email.com" value={email} onChange={e => setEmail(e.target.value)} />
+          <input className="gst-input" type="password" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") handleSubmit(); }} />
+          {error && <p style={{ color: "#7A4A2E", fontSize: 12.5, margin: 0 }}>{error}</p>}
+          {avisoRegistro && <p style={{ color: nude.accentDark, fontSize: 12.5, margin: 0 }}>{avisoRegistro}</p>}
+          <button className="gst-btn" style={{ width: "100%", marginTop: 4 }} onClick={handleSubmit} disabled={loading}>
+            {loading ? "un segundo..." : modo === "login" ? "entrar" : "crear cuenta"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  const [session, setSession] = useState(null);
+  const [loadingSession, setLoadingSession] = useState(true);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setLoadingSession(false);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+    });
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  if (loadingSession) {
+    return <div style={{ background: nude.bg, minHeight: "100vh" }} />;
+  }
+  if (!session) {
+    return <AuthScreen />;
+  }
+  return <GastosAppInner user={session.user} />;
 }
