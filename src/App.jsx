@@ -34,6 +34,10 @@ function fmtFecha(iso) {
   const [y, m, d] = iso.split("-");
   return `${d}/${m}`;
 }
+function monthKeyFromFecha(fecha, fallback) {
+  if (fecha && /^\d{4}-\d{2}/.test(fecha)) return fecha.slice(0, 7);
+  return fallback;
+}
 
 const nude = {
   bg: "#FAF6F0", border: "#D9C4AE", borderSoft: "#EFE5D8",
@@ -135,10 +139,11 @@ function GastosAppInner({ user }) {
   }
 
   async function addSeed(tarjetaId, seed) {
+    const startMonth = monthKeyFromFecha(seed.fecha, currentMonth);
     const { data, error } = await supabase.from("gastos_tarjeta").insert({
       user_id: user.id, tarjeta_id: tarjetaId, nombre: seed.nombre, categoria: seed.categoria,
       monto: seed.monto, moneda: seed.moneda || "ARS", fecha: seed.fecha || null,
-      cuotas: seed.cuotas, cuota_mensual: seed.cuotaMensual, fijo: !!seed.fijo, start_month: currentMonth,
+      cuotas: seed.cuotas, cuota_mensual: seed.cuotaMensual, fijo: !!seed.fijo, start_month: startMonth,
     }).select().single();
     if (error) { console.error(error); return; }
     setGastosTarjeta(prev => [...prev, {
@@ -161,12 +166,14 @@ function GastosAppInner({ user }) {
   }
 
   async function updateSeedInfo(seedId, updates) {
+    const actual = gastosTarjeta.find(s => s.id === seedId);
+    const startMonth = monthKeyFromFecha(updates.fecha, actual?.startMonth || currentMonth);
     const { error } = await supabase.from("gastos_tarjeta").update({
       nombre: updates.nombre, categoria: updates.categoria, monto: updates.monto,
-      moneda: updates.moneda, fecha: updates.fecha, cuota_mensual: updates.cuotaMensual,
+      moneda: updates.moneda, fecha: updates.fecha, cuota_mensual: updates.cuotaMensual, start_month: startMonth,
     }).eq("id", seedId);
     if (error) { console.error(error); return; }
-    setGastosTarjeta(prev => prev.map(s => s.id === seedId ? { ...s, ...updates } : s));
+    setGastosTarjeta(prev => prev.map(s => s.id === seedId ? { ...s, ...updates, startMonth } : s));
   }
 
   function getTarjeta(id) { return tarjetas.find(t => t.id === id) || tarjetas[0]; }
@@ -196,9 +203,10 @@ function GastosAppInner({ user }) {
   }
 
   async function addMovimiento(sec, item) {
+    const monthKeyVal = monthKeyFromFecha(item.fecha, currentMonth);
     const { data, error } = await supabase.from("movimientos").insert({
       user_id: user.id, seccion: sec, tipo: item.tipo, nombre: item.nombre, categoria: item.categoria,
-      monto: item.monto, moneda: item.moneda || "ARS", fecha: item.fecha || null, month_key: currentMonth,
+      monto: item.monto, moneda: item.moneda || "ARS", fecha: item.fecha || null, month_key: monthKeyVal,
     }).select().single();
     if (error) { console.error(error); return; }
     setMovimientos(prev => [...prev, {
@@ -214,12 +222,14 @@ function GastosAppInner({ user }) {
   }
 
   async function updateMovimientoInfo(id, updates) {
+    const actual = movimientos.find(m => m.id === id);
+    const monthKeyVal = monthKeyFromFecha(updates.fecha, actual?.monthKey || currentMonth);
     const { error } = await supabase.from("movimientos").update({
       nombre: updates.nombre, categoria: updates.categoria, monto: updates.monto,
-      moneda: updates.moneda, fecha: updates.fecha, tipo: updates.tipo,
+      moneda: updates.moneda, fecha: updates.fecha, tipo: updates.tipo, month_key: monthKeyVal,
     }).eq("id", id);
     if (error) { console.error(error); return; }
-    setMovimientos(prev => prev.map(m => m.id === id ? { ...m, ...updates } : m));
+    setMovimientos(prev => prev.map(m => m.id === id ? { ...m, ...updates, monthKey: monthKeyVal } : m));
   }
 
   const tarj = getTarjeta(activeTarjeta);
