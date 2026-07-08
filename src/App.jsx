@@ -107,13 +107,24 @@ export default function GastosApp() {
     const seeds = getAllSeeds(tarjetaId);
     const items = [];
     seeds.forEach(s => {
+      if (s.fijo) {
+        if (mk >= s.startMonth && (!s.finMonth || mk <= s.finMonth)) {
+          items.push({
+            id: s.id + "-" + mk, seedId: s.id, seedMonth: s.startMonth,
+            nombre: s.nombre, categoria: s.categoria, monto: s.monto,
+            cuotas: null, cuotaMensual: s.monto, cuotaActual: null,
+            moneda: s.moneda || "ARS", fecha: s.fecha || "", fijo: true,
+          });
+        }
+        return;
+      }
       for (let i = 0; i < s.cuotas; i++) {
         if (addMonths(s.startMonth, i) === mk) {
           items.push({
             id: s.id + "-" + i, seedId: s.id, seedMonth: s.startMonth,
             nombre: s.nombre, categoria: s.categoria, monto: s.monto,
             cuotas: s.cuotas, cuotaMensual: s.cuotaMensual, cuotaActual: i + 1,
-            moneda: s.moneda || "ARS", fecha: s.fecha || "",
+            moneda: s.moneda || "ARS", fecha: s.fecha || "", fijo: false,
           });
         }
       }
@@ -147,6 +158,23 @@ export default function GastosApp() {
           tarjeta_seeds: {
             ...base.tarjeta_seeds,
             [tarjetaId]: base.tarjeta_seeds[tarjetaId].filter(s => s.id !== seedId)
+          }
+        }
+      };
+    });
+  }
+
+  function darDeBajaSeed(tarjetaId, seedId, seedMonth, finMonth) {
+    setAllData(prev => {
+      const base = prev[seedMonth];
+      if (!base?.tarjeta_seeds?.[tarjetaId]) return prev;
+      return {
+        ...prev,
+        [seedMonth]: {
+          ...base,
+          tarjeta_seeds: {
+            ...base.tarjeta_seeds,
+            [tarjetaId]: base.tarjeta_seeds[tarjetaId].map(s => s.id === seedId ? { ...s, finMonth } : s)
           }
         }
       };
@@ -297,9 +325,9 @@ export default function GastosApp() {
   }, [allData, tarjetas, year, month]);
 
   return (
-    <div style={{ fontFamily: "'Quicksand', sans-serif", background: nude.bg, minHeight: "100vh", padding: "28px 18px 60px", color: nude.text }}>
+    <div style={{ fontFamily: "'Manrope', sans-serif", background: nude.bg, minHeight: "100vh", padding: "28px 18px 60px", color: nude.text }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
         * { box-sizing: border-box; }
         .gst-input { border: 1.5px solid ${nude.border}; border-radius: 14px; padding: 10px 14px; font-family: inherit; font-size: 14px; background: #fff; color: ${nude.text}; outline: none; width: 100%; }
         .gst-input:focus { border-color: ${nude.accent}; }
@@ -308,7 +336,7 @@ export default function GastosApp() {
         .gst-btn-ghost { background: #fff; color: ${nude.accent}; border: 1.5px solid ${nude.border}; border-radius: 999px; padding: 9px 18px; font-family: inherit; font-weight: 700; font-size: 13px; cursor: pointer; }
         .gst-btn-ghost:hover { background: ${nude.accentLight}; }
         .gst-tab { flex: 1; text-align: center; padding: 9px 0; border-radius: 999px; font-weight: 700; font-size: 12px; cursor: pointer; transition: all 0.15s; display: flex; align-items: center; justify-content: center; gap: 4px; }
-        .gst-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-radius: 16px; background: #fff; border: 1px solid ${nude.borderSoft}; }
+        .gst-row { display: flex; align-items: flex-start; justify-content: space-between; padding: 12px 14px; border-radius: 16px; background: #fff; border: 1px solid ${nude.borderSoft}; text-align: left; }
         .gst-x { background: none; border: none; color: ${nude.textMuted}; opacity: 0.5; cursor: pointer; font-size: 16px; padding: 4px; line-height: 1; }
         .gst-x:hover { opacity: 1; color: ${nude.accentDark}; }
         select.gst-input { appearance: none; }
@@ -484,23 +512,35 @@ export default function GastosApp() {
               {tarjetaItems.length === 0 && <p style={{ textAlign: "center", color: nude.textMuted, fontSize: 13.5, padding: "20px 0" }}>Todavía no agregaste gastos de tarjeta este mes ✿</p>}
               {tarjetaItems.map(g => (
                 <div className="gst-row" key={g.id}>
-                  <div>
+                  <div style={{ textAlign: "left" }}>
                     <div style={{ fontWeight: 600, fontSize: 14 }}>{g.nombre}</div>
                     <div style={{ fontSize: 12, color: nude.textMuted, marginTop: 2 }}>
-                      {g.categoria}{g.cuotas > 1 ? ` · cuota ${g.cuotaActual}/${g.cuotas}` : ""}{g.fecha ? ` · ${fmtFecha(g.fecha)}` : ""}
+                      {g.categoria}{g.fijo ? " · fijo mensual" : (g.cuotas > 1 ? ` · cuota ${g.cuotaActual}/${g.cuotas}` : "")}{g.fecha ? ` · ${fmtFecha(g.fecha)}` : ""}
                     </div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <div style={{ textAlign: "right" }}>
                       <div style={{ fontWeight: 700, fontSize: 14.5 }}>{fmt(g.cuotaMensual, g.moneda)}</div>
-                      {g.cuotas > 1 && <div style={{ fontSize: 11, color: nude.textMuted }}>total {fmt(g.monto, g.moneda)}</div>}
+                      {!g.fijo && g.cuotas > 1 && <div style={{ fontSize: 11, color: nude.textMuted }}>total {fmt(g.monto, g.moneda)}</div>}
                     </div>
                     {confirmDeleteItemId === g.id ? (
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button className="gst-btn-ghost" style={{ padding: "5px 10px", fontSize: 11 }} onClick={() => setConfirmDeleteItemId(null)}>no</button>
-                        <button className="gst-btn" style={{ padding: "5px 10px", fontSize: 11, background: "#7A4A2E" }}
-                          onClick={() => { removeSeed(activeTarjeta, g.seedId, g.seedMonth); setConfirmDeleteItemId(null); }}>sí, borrar</button>
-                      </div>
+                      g.fijo ? (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button className="gst-btn-ghost" style={{ padding: "5px 10px", fontSize: 11 }} onClick={() => setConfirmDeleteItemId(null)}>no</button>
+                            <button className="gst-btn-ghost" style={{ padding: "5px 10px", fontSize: 11 }}
+                              onClick={() => { darDeBajaSeed(activeTarjeta, g.seedId, g.seedMonth, addMonths(currentMonth, -1)); setConfirmDeleteItemId(null); }}>dar de baja</button>
+                            <button className="gst-btn" style={{ padding: "5px 10px", fontSize: 11, background: "#7A4A2E" }}
+                              onClick={() => { removeSeed(activeTarjeta, g.seedId, g.seedMonth); setConfirmDeleteItemId(null); }}>borrar todo</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button className="gst-btn-ghost" style={{ padding: "5px 10px", fontSize: 11 }} onClick={() => setConfirmDeleteItemId(null)}>no</button>
+                          <button className="gst-btn" style={{ padding: "5px 10px", fontSize: 11, background: "#7A4A2E" }}
+                            onClick={() => { removeSeed(activeTarjeta, g.seedId, g.seedMonth); setConfirmDeleteItemId(null); }}>sí, borrar</button>
+                        </div>
+                      )
                     ) : (
                       <button className="gst-x" onClick={() => setConfirmDeleteItemId(g.id)}>×</button>
                     )}
@@ -554,13 +594,17 @@ function AddTarjetaForm({ onAdd, onCancel, nude }) {
   const [categoria, setCategoria] = useState(CATS_TARJETA[0]);
   const [moneda, setMoneda] = useState("ARS");
   const [fecha, setFecha] = useState(todayISO());
-  const [esCuotas, setEsCuotas] = useState(false);
+  const [tipoCarga, setTipoCarga] = useState("unico");
   const [cuotas, setCuotas] = useState(2);
 
   function handleSubmit() {
     const montoNum = Number(monto);
     if (!nombre.trim() || !montoNum || montoNum <= 0) return;
-    const nc = esCuotas ? Math.max(2, Math.round(Number(cuotas))) : 1;
+    if (tipoCarga === "fijo") {
+      onAdd({ nombre: nombre.trim(), categoria, monto: montoNum, moneda, fecha, cuotas: 1, cuotaMensual: montoNum, fijo: true });
+      return;
+    }
+    const nc = tipoCarga === "cuotas" ? Math.max(2, Math.round(Number(cuotas))) : 1;
     onAdd({ nombre: nombre.trim(), categoria, monto: montoNum, moneda, fecha, cuotas: nc, cuotaMensual: Math.round((montoNum / nc) * 100) / 100 });
   }
 
@@ -579,11 +623,15 @@ function AddTarjetaForm({ onAdd, onCancel, nude }) {
           {MONEDAS.map(m => <option key={m.code} value={m.code}>{m.sym} {m.label}</option>)}
         </select>
       </div>
-      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, color: nude.textMuted, cursor: "pointer" }}>
-        <input type="checkbox" checked={esCuotas} onChange={e => setEsCuotas(e.target.checked)} style={{ width: 16, height: 16, accentColor: nude.accent }} />
-        Lo pagué en cuotas
-      </label>
-      {esCuotas && (
+      <div style={{ display: "flex", gap: 4, background: nude.accentLight, borderRadius: 999, padding: 4 }}>
+        {[{ id: "unico", label: "Único" }, { id: "cuotas", label: "En cuotas" }, { id: "fijo", label: "Fijo mensual" }].map(o => (
+          <div key={o.id} onClick={() => setTipoCarga(o.id)}
+            style={{ flex: 1, textAlign: "center", padding: "8px 4px", borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: "pointer", background: tipoCarga === o.id ? nude.accent : "transparent", color: tipoCarga === o.id ? "#fff" : nude.accentDark }}>
+            {o.label}
+          </div>
+        ))}
+      </div>
+      {tipoCarga === "cuotas" && (
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 13, color: nude.textMuted }}>Cantidad de cuotas</span>
           <input className="gst-input" type="number" min={2} value={cuotas} onChange={e => setCuotas(e.target.value)} style={{ width: 70 }} />
@@ -591,6 +639,11 @@ function AddTarjetaForm({ onAdd, onCancel, nude }) {
             <span style={{ fontSize: 12.5, color: nude.accentDark, fontWeight: 700 }}>≈ {fmt(Number(monto) / Number(cuotas), moneda)}/mes</span>
           )}
         </div>
+      )}
+      {tipoCarga === "fijo" && (
+        <p style={{ fontSize: 12.5, color: nude.textMuted, margin: 0 }}>
+          Este monto se va a repetir automáticamente cada mes desde {fecha ? fmtFecha(fecha) : "hoy"} en adelante, hasta que lo des de baja.
+        </p>
       )}
       <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
         <button className="gst-btn-ghost" style={{ flex: 1 }} onClick={onCancel}>cancelar</button>
@@ -628,7 +681,7 @@ function MovimientosSection({ movs, totales, seccion, showAdd, setShowAdd, onAdd
         {movs.length === 0 && <p style={{ textAlign: "center", color: nude.textMuted, fontSize: 13.5, padding: "20px 0" }}>Todavía no agregaste {label}s este mes ✿</p>}
         {movs.map(m => (
           <div className="gst-row" key={m.id}>
-            <div>
+            <div style={{ textAlign: "left" }}>
               <div style={{ fontWeight: 600, fontSize: 14 }}>{m.nombre}</div>
               <div style={{ fontSize: 12, color: nude.textMuted, marginTop: 2 }}>{m.categoria}{m.fecha ? ` · ${fmtFecha(m.fecha)}` : ""}</div>
             </div>
