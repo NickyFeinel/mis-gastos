@@ -49,7 +49,7 @@ function GastosAppInner({ user }) {
   const [movimientos, setMovimientos] = useState([]);
   const [activeTarjeta, setActiveTarjeta] = useState(null);
   const [loaded, setLoaded] = useState(false);
-  const [activeTab, setActiveTab] = useState("tarjeta");
+  const [activeTab, setActiveTab] = useState("efectivo");
   const [showAddTarjeta, setShowAddTarjeta] = useState(false);
   const [showAddDigital, setShowAddDigital] = useState(false);
   const [showAddEfectivo, setShowAddEfectivo] = useState(false);
@@ -369,7 +369,7 @@ function GastosAppInner({ user }) {
 
         {/* Tabs */}
         <div style={{ display: "flex", background: nude.accentLight, borderRadius: 999, padding: 4, marginBottom: 20, gap: 4 }}>
-          {["tarjeta", "digital", "efectivo"].map(t => (
+          {["efectivo", "digital", "tarjeta"].map(t => (
             <div key={t} className="gst-tab" onClick={() => { setActiveTab(t); setShowAddTarjeta(false); setShowAddDigital(false); setShowAddEfectivo(false); setEditingCardName(false); setConfirmDeleteTarjeta(false); }}
               style={{ background: activeTab === t ? nude.accent : "transparent", color: activeTab === t ? "#fff" : nude.accentDark }}>
               {t.charAt(0).toUpperCase() + t.slice(1)}
@@ -474,8 +474,8 @@ function GastosAppInner({ user }) {
                 <div style={{ fontSize: 28, fontWeight: 700, color: nude.accentDark }}>{fmt(0)}</div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                  {Object.entries(totalesTarjetaPorMoneda).map(([mon, val], i) => (
-                    <div key={mon} style={{ fontSize: i === 0 ? 28 : 16, fontWeight: 700, color: nude.accentDark }}>{fmt(val, mon)}</div>
+                  {MONEDAS.map(m => m.code).filter(code => totalesTarjetaPorMoneda[code] !== undefined).map((mon, i) => (
+                    <div key={mon} style={{ fontSize: i === 0 ? 28 : 16, fontWeight: 700, color: nude.accentDark }}>{fmt(totalesTarjetaPorMoneda[mon], mon)}</div>
                   ))}
                 </div>
               )}
