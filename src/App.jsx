@@ -284,27 +284,27 @@ function GastosAppInner({ user }) {
       if (!porMoneda[mon]) porMoneda[mon] = { totalGastos: 0, totalIngresos: 0, porTarjeta: 0, porDigital: 0, porEfectivo: 0 };
       porMoneda[mon][key] += val;
     }
+    // La tarjeta es informativa (deuda contraída este mes), no plata real que salió todavía.
     tarjetas.forEach(t => {
       getItemsForMonth(t.id, currentMonth).forEach(g => {
         const mon = g.moneda || "ARS";
-        addTo(mon, "totalGastos", g.cuotaMensual);
         addTo(mon, "porTarjeta", g.cuotaMensual);
       });
     });
+    // Digital y efectivo sí son plata real (incluye pagos de tarjeta, que son la salida real de esa deuda).
     digitalMovs.forEach(m => {
       const mon = m.moneda || "ARS";
-      if (m.categoria === "Pago de tarjeta") return;
       if (m.tipo === "gasto") { addTo(mon, "totalGastos", m.monto); addTo(mon, "porDigital", m.monto); }
       else addTo(mon, "totalIngresos", m.monto);
     });
     efectivoMovs.forEach(m => {
       const mon = m.moneda || "ARS";
-      if (m.categoria === "Pago de tarjeta") return;
       if (m.tipo === "gasto") { addTo(mon, "totalGastos", m.monto); addTo(mon, "porEfectivo", m.monto); }
       else addTo(mon, "totalIngresos", m.monto);
     });
     return porMoneda;
   }, [tarjetas, gastosTarjeta, digitalMovs, efectivoMovs, currentMonth]);
+
 
   const last6Months = useMemo(() => {
     const result = [];
@@ -851,7 +851,7 @@ function AddMovForm({ onAdd, onCancel, tarjetas, nude }) {
             {(tarjetas || []).map(t => <option key={t.id} value={t.id}>{t.nombre}</option>)}
           </select>
           <p style={{ fontSize: 11.5, color: nude.textMuted, margin: "6px 0 0" }}>
-            Este pago no se va a sumar de nuevo al total general, porque ya se contó como gasto en la tarjeta.
+            Este pago sí se va a contar como salida real de tu plata (efectivo/digital) este mes. Lo vinculamos con la tarjeta solo para tener el registro de qué pagaste.
           </p>
         </div>
       )}
@@ -920,7 +920,6 @@ function ResumenSection({ resumen, monthLabel, last6, nude }) {
   const saldoPrincipal = rPrincipal.totalIngresos - rPrincipal.totalGastos;
   const maxVal = Math.max(...last6.map(m => Math.max(m.gastos, m.ingresos)), 1);
   const breakdown = [
-    { label: "Tarjeta", monto: rPrincipal.porTarjeta, color: "#8B5E3C" },
     { label: "Digital", monto: rPrincipal.porDigital, color: "#B08968" },
     { label: "Efectivo", monto: rPrincipal.porEfectivo, color: "#D9C4AE" },
   ].filter(b => b.monto > 0);
@@ -938,6 +937,7 @@ function ResumenSection({ resumen, monthLabel, last6, nude }) {
           <div style={{ fontSize: 11.5, color: nude.textMuted, fontWeight: 600, marginBottom: 4 }}>BALANCE DEL MES</div>
           <div style={{ fontSize: 26, fontWeight: 700, color: saldoPrincipal >= 0 ? "#3B6D11" : "#7A4A2E" }}>{saldoPrincipal >= 0 ? "+" : ""}{fmt(saldoPrincipal, principal)}</div>
           <div style={{ fontSize: 12, color: nude.textMuted, marginTop: 4 }}>{saldoPrincipal >= 0 ? "¡Vas bien, te sobró platita este mes ✿" : "Este mes gastaste más de lo que entró"}</div>
+          <div style={{ fontSize: 11.5, color: nude.textMuted, marginTop: 6 }}>Este balance es tu plata real (efectivo + digital). No incluye lo gastado con tarjeta todavía sin pagar.</div>
         </div>
         {otrasMonedas.length > 0 && (
           <div style={{ borderTop: `1px solid ${nude.borderSoft}`, marginTop: 14, paddingTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
@@ -955,6 +955,16 @@ function ResumenSection({ resumen, monthLabel, last6, nude }) {
           </div>
         )}
       </div>
+
+      {rPrincipal.porTarjeta > 0 && (
+        <div style={{ background: "#fff", borderRadius: 20, border: `1px solid ${nude.borderSoft}`, padding: "18px 20px", marginBottom: 16 }}>
+          <div style={{ fontSize: 12, color: nude.textMuted, fontWeight: 700, letterSpacing: 0.5, marginBottom: 8 }}>GASTADO CON TARJETA ESTE MES</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: nude.accentDark }}>{fmt(rPrincipal.porTarjeta, principal)}</div>
+          <div style={{ fontSize: 11.5, color: nude.textMuted, marginTop: 4 }}>
+            Es deuda contraída, todavía no salió de tu plata real. Cuando la pagues, cargala en Digital o Efectivo con la categoría "Pago de tarjeta" para que se refleje ahí.
+          </div>
+        </div>
+      )}
 
       {breakdown.length > 0 && (
         <div style={{ background: "#fff", borderRadius: 20, border: `1px solid ${nude.borderSoft}`, padding: "18px 20px", marginBottom: 16 }}>
