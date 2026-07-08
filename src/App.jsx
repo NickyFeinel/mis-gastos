@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "./supabaseClient";
 
 const CATS_TARJETA = ["Moda y Belleza","Servicios","Salud","Hogar","Otro"];
-const CATS_GASTO = ["Comida","Transporte","Salidas","Moda y Belleza","Salud","Servicios","Caprichos","Regalo","Otro"];
+const CATS_GASTO = ["Comida","Transporte","Salidas","Moda y Belleza","Salud","Servicios","Caprichos","Regalo","Pago de tarjeta","Otro"];
 const CATS_INGRESO = ["Sueldo","Devolución","Venta","Regalo","Otro ingreso"];
 const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 const MONEDAS = [
@@ -93,7 +93,7 @@ function GastosAppInner({ user }) {
       if (mErr) console.error(mErr);
       setMovimientos((movsData || []).map(m => ({
         id: m.id, seccion: m.seccion, tipo: m.tipo, nombre: m.nombre, categoria: m.categoria,
-        monto: Number(m.monto), moneda: m.moneda, fecha: m.fecha, monthKey: m.month_key,
+        monto: Number(m.monto), moneda: m.moneda, fecha: m.fecha, monthKey: m.month_key, tarjetaId: m.tarjeta_id,
       })));
 
       setLoaded(true);
@@ -207,11 +207,13 @@ function GastosAppInner({ user }) {
     const { data, error } = await supabase.from("movimientos").insert({
       user_id: user.id, seccion: sec, tipo: item.tipo, nombre: item.nombre, categoria: item.categoria,
       monto: item.monto, moneda: item.moneda || "ARS", fecha: item.fecha || null, month_key: monthKeyVal,
+      tarjeta_id: item.tarjetaId || null,
     }).select().single();
     if (error) { console.error(error); return; }
     setMovimientos(prev => [...prev, {
       id: data.id, seccion: data.seccion, tipo: data.tipo, nombre: data.nombre, categoria: data.categoria,
       monto: Number(data.monto), moneda: data.moneda, fecha: data.fecha, monthKey: data.month_key,
+      tarjetaId: data.tarjeta_id,
     }]);
   }
 
@@ -227,6 +229,7 @@ function GastosAppInner({ user }) {
     const { error } = await supabase.from("movimientos").update({
       nombre: updates.nombre, categoria: updates.categoria, monto: updates.monto,
       moneda: updates.moneda, fecha: updates.fecha, tipo: updates.tipo, month_key: monthKeyVal,
+      tarjeta_id: updates.tarjetaId || null,
     }).eq("id", id);
     if (error) { console.error(error); return; }
     setMovimientos(prev => prev.map(m => m.id === id ? { ...m, ...updates, monthKey: monthKeyVal } : m));
@@ -290,11 +293,13 @@ function GastosAppInner({ user }) {
     });
     digitalMovs.forEach(m => {
       const mon = m.moneda || "ARS";
+      if (m.categoria === "Pago de tarjeta") return;
       if (m.tipo === "gasto") { addTo(mon, "totalGastos", m.monto); addTo(mon, "porDigital", m.monto); }
       else addTo(mon, "totalIngresos", m.monto);
     });
     efectivoMovs.forEach(m => {
       const mon = m.moneda || "ARS";
+      if (m.categoria === "Pago de tarjeta") return;
       if (m.tipo === "gasto") { addTo(mon, "totalGastos", m.monto); addTo(mon, "porEfectivo", m.monto); }
       else addTo(mon, "totalIngresos", m.monto);
     });
@@ -597,6 +602,7 @@ function GastosAppInner({ user }) {
             onAdd={item => addMovimiento(activeTab, item)}
             onRemove={id => removeMovimiento(activeTab, id)}
             onUpdate={(id, updates) => updateMovimientoInfo(id, updates)}
+            tarjetas={tarjetas}
             nude={nude}
           />
         )}
@@ -726,7 +732,7 @@ function EditTarjetaItemForm({ item, onSave, onCancel, nude }) {
   );
 }
 
-function MovimientosSection({ movs, totales, seccion, showAdd, setShowAdd, onAdd, onRemove, onUpdate, nude }) {
+function MovimientosSection({ movs, totales, seccion, showAdd, setShowAdd, onAdd, onRemove, onUpdate, tarjetas, nude }) {
   const label = seccion === "digital" ? "movimiento digital" : "movimiento en efectivo";
   const [confirmId, setConfirmId] = useState(null);
   const [editingId, setEditingId] = useState(null);
@@ -756,12 +762,14 @@ function MovimientosSection({ movs, totales, seccion, showAdd, setShowAdd, onAdd
         {movs.map(m => (
           <div className="gst-row" key={m.id} style={editingId === m.id ? { display: "block" } : {}}>
             {editingId === m.id ? (
-              <EditMovForm item={m} onSave={updates => { onUpdate(m.id, updates); setEditingId(null); }} onCancel={() => setEditingId(null)} nude={nude} />
+              <EditMovForm item={m} onSave={updates => { onUpdate(m.id, updates); setEditingId(null); }} onCancel={() => setEditingId(null)} tarjetas={tarjetas} nude={nude} />
             ) : (
               <>
                 <div style={{ textAlign: "left" }}>
                   <div style={{ fontWeight: 600, fontSize: 14 }}>{m.nombre}</div>
-                  <div style={{ fontSize: 12, color: nude.textMuted, marginTop: 2 }}>{m.categoria}{m.fecha ? ` · ${fmtFecha(m.fecha)}` : ""}</div>
+                  <div style={{ fontSize: 12, color: nude.textMuted, marginTop: 2 }}>
+                    {m.categoria}{m.categoria === "Pago de tarjeta" && m.tarjetaId ? ` (${(tarjetas.find(t => t.id === m.tarjetaId) || {}).nombre || "tarjeta"})` : ""}{m.fecha ? ` · ${fmtFecha(m.fecha)}` : ""}
+                  </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <div style={{ fontWeight: 700, fontSize: 14.5, color: m.tipo === "ingreso" ? "#3B6D11" : nude.text }}>
@@ -793,26 +801,28 @@ function MovimientosSection({ movs, totales, seccion, showAdd, setShowAdd, onAdd
         ))}
       </div>
       {showAdd
-        ? <AddMovForm onAdd={item => { onAdd(item); setShowAdd(false); }} onCancel={() => setShowAdd(false)} nude={nude} />
+        ? <AddMovForm onAdd={item => { onAdd(item); setShowAdd(false); }} onCancel={() => setShowAdd(false)} tarjetas={tarjetas} nude={nude} />
         : <button className="gst-btn" style={{ width: "100%" }} onClick={() => setShowAdd(true)}>+ agregar {label}</button>}
     </>
   );
 }
 
-function AddMovForm({ onAdd, onCancel, nude }) {
+function AddMovForm({ onAdd, onCancel, tarjetas, nude }) {
   const [nombre, setNombre] = useState("");
   const [monto, setMonto] = useState("");
   const [tipo, setTipo] = useState("gasto");
   const [categoria, setCategoria] = useState(CATS_GASTO[0]);
   const [moneda, setMoneda] = useState("ARS");
   const [fecha, setFecha] = useState(todayISO());
+  const [tarjetaId, setTarjetaId] = useState(tarjetas?.[0]?.id || "");
   const cats = tipo === "ingreso" ? CATS_INGRESO : CATS_GASTO;
   useEffect(() => { setCategoria(tipo === "ingreso" ? CATS_INGRESO[0] : CATS_GASTO[0]); }, [tipo]);
 
   function handleSubmit() {
     const montoNum = Number(monto);
     if (!nombre.trim() || !montoNum || montoNum <= 0) return;
-    onAdd({ id: uid(), nombre: nombre.trim(), categoria, monto: montoNum, moneda, fecha, tipo });
+    const esPago = categoria === "Pago de tarjeta";
+    onAdd({ id: uid(), nombre: nombre.trim(), categoria, monto: montoNum, moneda, fecha, tipo, tarjetaId: esPago ? tarjetaId : null });
   }
 
   return (
@@ -835,6 +845,16 @@ function AddMovForm({ onAdd, onCancel, nude }) {
           {MONEDAS.map(m => <option key={m.code} value={m.code}>{m.sym} {m.label}</option>)}
         </select>
       </div>
+      {tipo === "gasto" && categoria === "Pago de tarjeta" && (
+        <div>
+          <select className="gst-input" value={tarjetaId} onChange={e => setTarjetaId(e.target.value)}>
+            {(tarjetas || []).map(t => <option key={t.id} value={t.id}>{t.nombre}</option>)}
+          </select>
+          <p style={{ fontSize: 11.5, color: nude.textMuted, margin: "6px 0 0" }}>
+            Este pago no se va a sumar de nuevo al total general, porque ya se contó como gasto en la tarjeta.
+          </p>
+        </div>
+      )}
       <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
         <button className="gst-btn-ghost" style={{ flex: 1 }} onClick={onCancel}>cancelar</button>
         <button className="gst-btn" style={{ flex: 1 }} onClick={handleSubmit}>guardar</button>
@@ -843,19 +863,21 @@ function AddMovForm({ onAdd, onCancel, nude }) {
   );
 }
 
-function EditMovForm({ item, onSave, onCancel, nude }) {
+function EditMovForm({ item, onSave, onCancel, tarjetas, nude }) {
   const [nombre, setNombre] = useState(item.nombre);
   const [monto, setMonto] = useState(item.monto);
   const [tipo, setTipo] = useState(item.tipo);
   const [categoria, setCategoria] = useState(item.categoria);
   const [moneda, setMoneda] = useState(item.moneda || "ARS");
   const [fecha, setFecha] = useState(item.fecha || todayISO());
+  const [tarjetaId, setTarjetaId] = useState(item.tarjetaId || tarjetas?.[0]?.id || "");
   const cats = tipo === "ingreso" ? CATS_INGRESO : CATS_GASTO;
 
   function handleSubmit() {
     const montoNum = Number(monto);
     if (!nombre.trim() || !montoNum || montoNum <= 0) return;
-    onSave({ nombre: nombre.trim(), categoria, monto: montoNum, moneda, fecha, tipo });
+    const esPago = categoria === "Pago de tarjeta";
+    onSave({ nombre: nombre.trim(), categoria, monto: montoNum, moneda, fecha, tipo, tarjetaId: esPago ? tarjetaId : null });
   }
 
   return (
@@ -878,6 +900,11 @@ function EditMovForm({ item, onSave, onCancel, nude }) {
           {MONEDAS.map(m => <option key={m.code} value={m.code}>{m.sym} {m.label}</option>)}
         </select>
       </div>
+      {tipo === "gasto" && categoria === "Pago de tarjeta" && (
+        <select className="gst-input" value={tarjetaId} onChange={e => setTarjetaId(e.target.value)}>
+          {(tarjetas || []).map(t => <option key={t.id} value={t.id}>{t.nombre}</option>)}
+        </select>
+      )}
       <div style={{ display: "flex", gap: 8 }}>
         <button className="gst-btn-ghost" style={{ flex: 1 }} onClick={onCancel}>cancelar</button>
         <button className="gst-btn" style={{ flex: 1 }} onClick={handleSubmit}>guardar cambios</button>
