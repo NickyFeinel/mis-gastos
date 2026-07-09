@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "./supabaseClient";
 
-const CATS_TARJETA = ["Moda y Belleza","Servicios","Salud","Hogar","Otro"];
-const CATS_GASTO = ["Comida","Transporte","Salidas","Moda y Belleza","Salud","Servicios","Caprichos","Regalo","Pago de tarjeta","Otro"];
-const CATS_INGRESO = ["Sueldo","Devolución","Venta","Regalo","Otro ingreso"];
+const CATS_GASTO = ["Hogar","Comida","Vehículos","Entretenimiento","Moda y Belleza","Salud","Servicios","Mascotas","Deporte/Hobby","Pago de tarjeta","Otro"];
+const CATS_TARJETA = CATS_GASTO;
+const CATS_INGRESO = ["Sueldo","Ganancia","Otro ingreso"];
 const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 const MONEDAS = [
   { code: "ARS", label: "Pesos", sym: "$" },
@@ -851,7 +851,7 @@ function AddMovForm({ onAdd, onCancel, tarjetas, nude }) {
             {(tarjetas || []).map(t => <option key={t.id} value={t.id}>{t.nombre}</option>)}
           </select>
           <p style={{ fontSize: 11.5, color: nude.textMuted, margin: "6px 0 0" }}>
-            Este pago sí se va a contar como salida real de tu plata (efectivo/digital) este mes. Lo vinculamos con la tarjeta solo para tener el registro de qué pagaste.
+            Este pago cuenta como salida real de tu dinero. Se vincula con la tarjeta solo para tener el registro.
           </p>
         </div>
       )}
@@ -936,8 +936,8 @@ function ResumenSection({ resumen, monthLabel, last6, nude }) {
         <div style={{ borderTop: `1px solid ${nude.borderSoft}`, paddingTop: 14 }}>
           <div style={{ fontSize: 11.5, color: nude.textMuted, fontWeight: 600, marginBottom: 4 }}>BALANCE DEL MES</div>
           <div style={{ fontSize: 26, fontWeight: 700, color: saldoPrincipal >= 0 ? "#3B6D11" : "#7A4A2E" }}>{saldoPrincipal >= 0 ? "+" : ""}{fmt(saldoPrincipal, principal)}</div>
-          <div style={{ fontSize: 12, color: nude.textMuted, marginTop: 4 }}>{saldoPrincipal >= 0 ? "¡Vas bien, te sobró platita este mes ✿" : "Este mes gastaste más de lo que entró"}</div>
-          <div style={{ fontSize: 11.5, color: nude.textMuted, marginTop: 6 }}>Este balance es tu plata real (efectivo + digital). No incluye lo gastado con tarjeta todavía sin pagar.</div>
+          <div style={{ fontSize: 12, color: nude.textMuted, marginTop: 4 }}>{saldoPrincipal >= 0 ? "¡Vas bien, te sobró platita este mes ✿" : "Este mes gastaste más de lo que ingresó"}</div>
+          <div style={{ fontSize: 11.5, color: nude.textMuted, marginTop: 6 }}>Este balance incluye tu plata real: efectivo y digital. No incluye lo gastado con tarjeta.</div>
         </div>
         {otrasMonedas.length > 0 && (
           <div style={{ borderTop: `1px solid ${nude.borderSoft}`, marginTop: 14, paddingTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
@@ -946,9 +946,14 @@ function ResumenSection({ resumen, monthLabel, last6, nude }) {
               const r = resumen[mon];
               const s = r.totalIngresos - r.totalGastos;
               return (
-                <div key={mon} style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-                  <span style={{ fontWeight: 600 }}>{mon}</span>
-                  <span>gastado {fmt(r.totalGastos, mon)} · balance {fmt(s, mon)}</span>
+                <div key={mon} style={{ fontSize: 13 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ fontWeight: 600 }}>{mon}</span>
+                    <span>gastado {fmt(r.totalGastos, mon)} · balance {fmt(s, mon)}</span>
+                  </div>
+                  {r.porTarjeta > 0 && (
+                    <div style={{ fontSize: 11.5, color: nude.textMuted, marginTop: 2 }}>tarjeta (sin pagar): {fmt(r.porTarjeta, mon)}</div>
+                  )}
                 </div>
               );
             })}
@@ -956,12 +961,16 @@ function ResumenSection({ resumen, monthLabel, last6, nude }) {
         )}
       </div>
 
-      {rPrincipal.porTarjeta > 0 && (
+      {MONEDAS.map(m => m.code).filter(code => (resumen[code]?.porTarjeta || 0) > 0).length > 0 && (
         <div style={{ background: "#fff", borderRadius: 20, border: `1px solid ${nude.borderSoft}`, padding: "18px 20px", marginBottom: 16 }}>
           <div style={{ fontSize: 12, color: nude.textMuted, fontWeight: 700, letterSpacing: 0.5, marginBottom: 8 }}>GASTADO CON TARJETA ESTE MES</div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: nude.accentDark }}>{fmt(rPrincipal.porTarjeta, principal)}</div>
-          <div style={{ fontSize: 11.5, color: nude.textMuted, marginTop: 4 }}>
-            Es deuda contraída, todavía no salió de tu plata real. Cuando la pagues, cargala en Digital o Efectivo con la categoría "Pago de tarjeta" para que se refleje ahí.
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            {MONEDAS.map(m => m.code).filter(code => (resumen[code]?.porTarjeta || 0) > 0).map((mon, i) => (
+              <div key={mon} style={{ fontSize: i === 0 ? 22 : 15, fontWeight: 700, color: nude.accentDark }}>{fmt(resumen[mon].porTarjeta, mon)}</div>
+            ))}
+          </div>
+          <div style={{ fontSize: 11.5, color: nude.textMuted, marginTop: 6 }}>
+            Esto es lo que gastaste con la tarjeta el mes de {monthLabel}. El pago se registra por separado en Efectivo o Digital.
           </div>
         </div>
       )}
